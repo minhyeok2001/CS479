@@ -95,8 +95,9 @@ class PointNetFeat(nn.Module):
         ## 현재 pointcloud는 [B,N,3] 이니까, reshape
         
         B = pointcloud.shape[0]
-        
         x = pointcloud.permute(0,2,1)
+        transform1 = None
+        transform2 = None
     
         if self.input_transform:
             transform1 = self.stn3(x)
@@ -105,8 +106,6 @@ class PointNetFeat(nn.Module):
             
         x = self.pointwise_mlp_1(x)
         ## x 차원은 B,64,N
-        
-        print("106 shape",x.shape) # 106 shape torch.Size([3, 64, 8])
         
         if self.feature_transform:            
             transform2 = self.stn64(x).permute(0,2,1)
@@ -126,11 +125,11 @@ class PointNetFeat(nn.Module):
         ## [B,1028]
         
         if self.return_mid :
-            return x, temp, self.stn3, self.stn64
+            return x, temp, transform1, transform2
         
         else :
             if self.input_transform or self.feature_transform :
-                return x, self.stn3, self.stn64
+                return x, transform1, transform2
             else :
                 return x 
 
