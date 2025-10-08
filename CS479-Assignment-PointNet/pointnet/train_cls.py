@@ -21,8 +21,11 @@ def step(points, labels, model):
     
     # TODO : Implement step function for classification.
 
-    loss = None
-    preds = None
+    pred,matrix1,matrix2 = model(points) # B, 가능한 label
+    loss = F.cross_entropy(pred,labels) + get_orthogonal_loss(matrix1) + get_orthogonal_loss(matrix2)
+    
+    preds = pred.argmax(dim=1)
+    
     return loss, preds
 
 
@@ -31,6 +34,10 @@ def train_step(points, labels, model, optimizer, train_acc_metric):
     train_batch_acc = train_acc_metric(preds, labels.to(device))
 
     # TODO : Implement backpropagation using optimizer and loss
+    
+    optimizer.zero_grad()
+    loss.backward()
+    optimizer.step()
 
     return loss, train_batch_acc
 
@@ -85,6 +92,7 @@ def main(args):
         pbar = tqdm(train_dl)
         train_epoch_loss = []
         for points, labels in pbar:
+            points, labels = points.to(device), labels.to(device)
             train_batch_loss, train_batch_acc = train_step(
                 points, labels, model, optimizer, train_acc_metric
             )

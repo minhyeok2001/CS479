@@ -26,9 +26,13 @@ def step(points, pc_labels, class_labels, model):
     
     # TODO : Implement step function for segmentation.
 
-    loss = None
-    logits = None
-    preds = None
+    ## 이때 logits은 [ B, N, m]
+    logits,matrix1,matrix2 = model(points) # B, 가능한 label
+    logits = logits.permute(0,2,1)
+    loss = F.cross_entropy(logits,pc_labels) + get_orthogonal_loss(matrix1) + get_orthogonal_loss(matrix2)
+    
+    preds = logits.argmax(dim=1)
+
     return loss, logits, preds
 
 
@@ -38,7 +42,9 @@ def train_step(points, pc_labels, class_labels, model, optimizer, train_acc_metr
     )
     train_batch_acc = train_acc_metric(preds, pc_labels.to(device))
 
-    # TODO : Implement backpropagation using optimizer and loss
+    optimizer.zero_grad()
+    loss.backward()
+    optimizer.step()
 
     return loss, train_batch_acc
 
@@ -90,6 +96,7 @@ def main(args):
         pbar = tqdm(train_dl)
         train_epoch_loss = []
         for points, pc_labels, class_labels in pbar:
+            points, pc_labels, class_labels = points.to(device), pc_labels.to(device), class_labels.to(device)
             train_batch_loss, train_batch_acc = train_step(
                 points, pc_labels, class_labels, model, optimizer, train_acc_metric
             )

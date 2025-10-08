@@ -126,10 +126,13 @@ class PointNetFeat(nn.Module):
         ## [B,1028]
         
         if self.return_mid :
-            return x, temp
+            return x, temp, self.stn3, self.stn64
         
         else :
-            return x
+            if self.input_transform or self.feature_transform :
+                return x, self.stn3, self.stn64
+            else :
+                return x 
 
 class PointNetCls(nn.Module):
     def __init__(self, num_classes, input_transform, feature_transform):
@@ -153,10 +156,10 @@ class PointNetCls(nn.Module):
             - ...
         """
         
-        x = self.pointnet_feat(pointcloud)
+        x,stn3,stn64= self.pointnet_feat(pointcloud)
         x = self.mlp(x)
 
-        return x
+        return x,stn3,stn64
 
 class PointNetPartSeg(nn.Module):
     def __init__(self, m=50):
@@ -176,7 +179,7 @@ class PointNetPartSeg(nn.Module):
             - ...
         """
         
-        x, temp= self.pointnet_feat(pointcloud)
+        x,temp,stn3,stn64= self.pointnet_feat(pointcloud)
         
         N = temp.shape[-1]
         # 지금 temp는 B,64,N
@@ -189,7 +192,7 @@ class PointNetPartSeg(nn.Module):
         x = torch.cat([temp.permute(0,2,1),x],dim=-1)
         x = self.mlp(x)        
         
-        return x
+        return x,stn3,stn64
 
 class PointNetAutoEncoder(nn.Module):
     def __init__(self, num_points):
@@ -215,7 +218,7 @@ class PointNetAutoEncoder(nn.Module):
         """
         B = pointcloud.shape[0]
         
-        x = self.pointnet_feat(pointcloud)  # B 1024 
+        x= self.pointnet_feat(pointcloud)  # B 1024 
         x = self.mlp1(x)
         x = self.mlp2(x)
         x = self.mlp3(x)
