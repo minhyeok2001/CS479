@@ -1,3 +1,4 @@
+import numpy
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -6,6 +7,7 @@ from torch.autograd import Variable
 
 class STNKd(nn.Module):
     # T-Net a.k.a. Spatial Transformer Network
+    ## 근데 나는 뭔가 matrix를 네트워크로 학습하도록 하고 그걸 곱하는 건줄 알았는데, 그런게 아니라 그냥 NN으로 하네? -> 그게 아니라,... identity matrix가 있어서 헷갈렸는데, 여기서는 곱해주는 matrix만 만드는거 맞음 !!
     def __init__(self, k: int):
         super().__init__()
         self.k = k
@@ -46,6 +48,7 @@ class STNKd(nn.Module):
         )
         x = x + identity
         x = x.reshape(-1, self.k, self.k)
+        ## 결국 out shape은 B,3,3꼴 
         return x
 
 
@@ -57,10 +60,12 @@ class PointNetFeat(nn.Module):
         self,
         input_transform: bool = False,
         feature_transform: bool = False,
+        return_mid = False
     ):
         super().__init__()
         self.input_transform = input_transform
         self.feature_transform = feature_transform
+        self.return_mid = return_mid
 
         if self.input_transform:
             self.stn3 = STNKd(k=3)
@@ -68,20 +73,63 @@ class PointNetFeat(nn.Module):
             self.stn64 = STNKd(k=64)
 
         # point-wise mlp
+        
+        self.pointwise_mlp_1 = nn.Sequential(nn.Conv1d(3,64,1), nn.Conv1d(64,64,1) ,nn.ReLU(inplace=True))
+        self.pointwise_mlp_2 = nn.Sequential(nn.Conv1d(64,128,1),nn.ReLU(inplace=True))
+        self.pointwise_mlp_3 = nn.Sequential(nn.Conv1d(128,1024,1),nn.ReLU(inplace=True))
+        
+        self.pooling = nn.AdaptiveMaxPool1d(1)
+    
+    
         # TODO : Implement point-wise mlp model based on PointNet Architecture.
 
     def forward(self, pointcloud):
         """
         Input:
-            - pointcloud: [B,N,3]
+            - pointcloud: [B,N,3] ## 여기서 N은 포인트클라우드 개수를 의미
         Output:
             - Global feature: [B,1024]
             - ...
         """
+        
+        ## 현재 pointcloud는 [B,N,3] 이니까, reshape
+        
+        B = pointcloud.shape[0]
+        
+        x = pointcloud.permute(0,2,1)
+    
+        if self.input_transform:
+            transform1 = self.stn3(x)
+            x = torch.bmm(pointcloud,transform1).permute(0,2,1)
+            ## 이렇게 하고나면 차원은 B,3,N
+            
+        x = self.pointwise_mlp_1(x)
+        ## x 차원은 B,64,N
+        
+        print("106 shape",x.shape) # 106 shape torch.Size([3, 64, 8])
+        
+        if self.feature_transform:            
+            transform2 = self.stn64(x).permute(0,2,1)
+            ## transform2 의 차원은 B 64,64
+            x = torch.bmm(x.permute(0,2,1),transform2).permute(0,2,1)
+            ## 이렇게 하고나면 차원은 B,64,N
+        temp = x
+        
+        x = self.pointwise_mlp_2(x)
+        x = self.pointwise_mlp_3(x)
+        
+        #print(x.shape)
+        # 아마 shape은 B,1028,N 일 것임
+        
+        x = self.pooling(x).reshape(B,-1)
 
-        # TODO : Implement forward function.
-        pass
-
+        ## [B,1028]
+        
+        if self.return_mid :
+            return x, temp
+        
+        else :
+            return x
 
 class PointNetCls(nn.Module):
     def __init__(self, num_classes, input_transform, feature_transform):
@@ -92,6 +140,8 @@ class PointNetCls(nn.Module):
         self.pointnet_feat = PointNetFeat(input_transform, feature_transform)
         
         # returns the final logits from the max-pooled features.
+        
+        self.mlp = nn.Sequential(nn.Linear(1024,512),nn.ReLU(inplace=True),nn.Linear(512,256),nn.ReLU(inplace=True),nn.Linear(256,self.num_classes)) 
         # TODO : Implement MLP that takes global feature as an input and return logits.
 
     def forward(self, pointcloud):
@@ -102,9 +152,11 @@ class PointNetCls(nn.Module):
             - logits [B,num_classes]
             - ...
         """
-        # TODO : Implement forward function.
-        pass
+        
+        x = self.pointnet_feat(pointcloud)
+        x = self.mlp(x)
 
+        return x
 
 class PointNetPartSeg(nn.Module):
     def __init__(self, m=50):
@@ -112,7 +164,8 @@ class PointNetPartSeg(nn.Module):
 
         # returns the logits for m part labels each point (m = # of parts = 50).
         # TODO: Implement part segmentation model based on PointNet Architecture.
-        pass
+        self.pointnet_feat = PointNetFeat(input_transform=True, feature_transform=True, return_mid=True)
+        self.mlp = nn.Sequential(nn.Linear(1088,512),nn.ReLU(inplace=True),nn.Linear(512,256),nn.ReLU(inplace=True),nn.Linear(256,128),nn.ReLU(inplace=True),nn.Linear(128,m)) 
 
     def forward(self, pointcloud):
         """
@@ -122,14 +175,32 @@ class PointNetPartSeg(nn.Module):
             - logits: [B,50,N] | 50: # of point labels
             - ...
         """
-        # TODO: Implement forward function.
-        pass
-
+        
+        x, temp= self.pointnet_feat(pointcloud)
+        
+        N = temp.shape[-1]
+        # 지금 temp는 B,64,N
+        
+        
+        # 현재 x 차원은 [B,1024]
+        # 이걸 [B, N, 1024] 로 확장하고 temp [B, N, 64] 랑 더해서 B, N, 1088을 만들기
+        
+        x = x.unsqueeze(1).repeat(1,N,1)
+        x = torch.cat([temp.permute(0,2,1),x],dim=-1)
+        x = self.mlp(x)        
+        
+        return x
 
 class PointNetAutoEncoder(nn.Module):
     def __init__(self, num_points):
         super().__init__()
-        self.pointnet_feat = PointNetFeat()
+        self.num_points = num_points
+        self.pointnet_feat = PointNetFeat(False,False,False)
+        
+        self.mlp1 = nn.Sequential(nn.Linear(1024, num_points//4), nn.BatchNorm1d(num_points//4), nn.ReLU(inplace=True))
+        self.mlp2 = nn.Sequential(nn.Linear(num_points//4,num_points//2), nn.BatchNorm1d(num_points//2),nn.ReLU(inplace=True))
+        self.mlp3 = nn.Sequential(nn.Linear(num_points//2,num_points),nn.BatchNorm1d(num_points),nn.Dropout(0.3), nn.ReLU(inplace=True))
+        self.mlp4 = nn.Linear(num_points,num_points*3)        
 
         # Decoder is just a simple MLP that outputs N x 3 (x,y,z) coordinates.
         # TODO : Implement decoder.
@@ -142,8 +213,18 @@ class PointNetAutoEncoder(nn.Module):
             - pointcloud [B,N,3]
             - ...
         """
-        # TODO : Implement forward function.
-        pass
+        B = pointcloud.shape[0]
+        
+        x = self.pointnet_feat(pointcloud)  # B 1024 
+        x = self.mlp1(x)
+        x = self.mlp2(x)
+        x = self.mlp3(x)
+        x = self.mlp4(x)
+        # B N*3
+        
+        x = x.reshape(B,-1,3)
+        
+        return x
 
 
 def get_orthogonal_loss(feat_trans, reg_weight=1e-3):
@@ -163,3 +244,21 @@ def get_orthogonal_loss(feat_trans, reg_weight=1e-3):
     mat_diff = (identity - mat_square).reshape(B, -1)
 
     return reg_weight * mat_diff.norm(dim=1).mean()
+
+"""
+
+## test ## 
+
+hola1 = PointNetCls(3,True,True)
+
+hola2 = PointNetPartSeg()
+
+hola3 = PointNetAutoEncoder(16)
+
+dump = torch.randn(3,8,3)
+
+print(dump.shape)
+
+hola3(dump)
+
+"""
