@@ -65,7 +65,15 @@ class StratifiedSampler(RaySamplerBase):
 
         # TODO
         # HINT: Freely use the provided methods 'create_t_bins' and 'map_t_to_euclidean'
-        raise NotImplementedError("Task 2")
+        # 이거를 torch.rand를 쓴다음에,bin 개수만큼 나눠주고, 각 시작점 더해주면 랜덤샘플링 되는거 아니냐? -> 아 논문식도 이거네 !!
+        
+        num_ray = len(ray_bundle)
+        t_bins = self.create_t_bins(num_sample,device=ray_bundle.nears.device) ## [B,# of bin]
+        t_samples = t_bins.expand(num_ray,num_sample) + torch.rand_like(t_bins)/num_sample
+        
+        t_samples = self.map_t_to_euclidean(t_samples, ray_bundle.nears, ray_bundle.fars)
+        
+        return t_samples
 
     @jaxtyped
     @typechecked

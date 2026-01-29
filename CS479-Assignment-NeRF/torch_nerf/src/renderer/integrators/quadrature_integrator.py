@@ -43,4 +43,18 @@ class QuadratureIntegrator(IntegratorBase):
         """
         # TODO
         # HINT: Look up the documentation of 'torch.cumsum'.
-        raise NotImplementedError("Task 3")
+        # T = torch.exp(-) 아 T는 cumsum 써야하는거같은데
+        
+        T = torch.exp(-(torch.cumsum(sigma*delta,dim=-1))) ## 이러면 T i=1~N까지 다 만들어짐 [N,S] 차원
+        
+        R,_ = sigma.shape
+        T = torch.cat([torch.tensor([1],device=sigma.device).expand(R,1),T[:,:-1]],dim=-1) ## N,S
+        
+        
+        weights = T*(1-torch.exp(-sigma * delta))
+        rgbs = torch.sum(weights.unsqueeze(-1) * radiance, dim=1) ## 여기서 나머지는 N,S 인데 radiance만 N,S,3임 -> 
+        
+        return rgbs, weights
+    
+        
+         
