@@ -19,6 +19,17 @@
   <img src="./media/nerf_blender/lego.gif" width="400" />
 </div>
 
+---
+## Result
+
+<div align="center">
+  <img src="https://github.com/user-attachments/assets/7f608bdb-b130-46df-8efc-624276fa8f16" width="60%">
+</div>
+
+2 hours on RTX3090, using vast.ai
+
+---
+
 ## Abstract
 
 The introduction of [Neural Radiance Fields (NeRF)](https://arxiv.org/abs/2003.08934) was a massive milestone in image-based, neural rendering literature.
