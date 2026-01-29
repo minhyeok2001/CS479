@@ -138,4 +138,4 @@ def test():
     print(model(pos,view_dir))
 
 
-test()
+#test()
