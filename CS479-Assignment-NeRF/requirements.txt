@@ -87,11 +87,4 @@ webencodings==0.5.1
 Werkzeug==2.3.6
 wrapt==1.14.1
 zipp==3.15.0
-hydra 
-torch
-torchmetrics
-tqdm
-jaxtyping
-typeguard==2.13.3
-opencv-python
-imageio
+
