@@ -71,7 +71,7 @@ class StratifiedSampler(RaySamplerBase):
         t_bins = self.create_t_bins(num_sample,device=ray_bundle.nears.device) ## [B,# of bin]
         t_samples = t_bins.expand(num_ray,num_sample) + torch.rand_like(t_bins)/num_sample
         
-        t_samples = self.map_t_to_euclidean(t_samples, ray_bundle.nears, ray_bundle.fars)
+        t_samples = self.map_t_to_euclidean(t_samples, ray_bundle.nears.unsqueeze(1), ray_bundle.fars.unsqueeze(1))
         
         return t_samples
 
@@ -105,8 +105,8 @@ class StratifiedSampler(RaySamplerBase):
     def map_t_to_euclidean(
         self,
         t_values: Shaped[torch.Tensor, "..."],
-        near: float,
-        far: float,
+        near,
+        far,
     ) -> Shaped[torch.Tensor, "..."]:
         """
         Maps values in the parametric space [0, 1] to Euclidean space [near, far].

@@ -116,6 +116,8 @@ class NeRF(nn.Module):
         
         #print(pe1.shape)
         #print(pe2.shape)
+
+        #print("hjahahahahahahaahahahahahahah")
         
         x = self.block1(pos)
         x = torch.cat([x,pos],dim=-1)
@@ -125,8 +127,11 @@ class NeRF(nn.Module):
         x = torch.cat([x,view_dir],dim=-1)
         x = self.block3(x)
         rgb = x 
+
+        #print(opacity.shape)
+        #print(rgb.shape)
         
-        return rgb,opacity
+        return opacity,rgb
 
 
 
