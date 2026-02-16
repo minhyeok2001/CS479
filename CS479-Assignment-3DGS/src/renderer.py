@@ -42,7 +42,7 @@ class GSRasterizer(object):
         # Retrieve camera pose (extrinsic)
         R = camera.camera_to_world[:3, :3]  # 3 x 3
         T = camera.camera_to_world[:3, 3:4]  # 3 x 1
-        R_edit = torch.diag(torch.tensor([1, -1, -1], device=R.device, dtype=R.dtype))
+        R_edit = torch.diag(torch.tensor([1, -1, -1], device=R.device, dtype=R.dtype))   ## 카메라 방향 바꾸는거임
         R = R @ R_edit
         R_inv = R.T
         T_inv = -R_inv @ T
@@ -50,6 +50,8 @@ class GSRasterizer(object):
         world_to_camera[:3, :3] = R_inv
         world_to_camera[:3, 3:4] = T_inv
         world_to_camera = world_to_camera.permute(1, 0)
+        
+        ## 그러면 이걸 해서 얻는게, world -> camera 좌표계임 ??? 근데 그거는 R|T 아니야?? :: 이거는 camera -> world임
 
         # Retrieve camera intrinsic
         proj_mat = camera.proj_mat.permute(1, 0)
@@ -124,11 +126,11 @@ class GSRasterizer(object):
         """
         Projects points to NDC space.
         
-        Args:
-        - points: 3D points in object space.
-        - w2c: World-to-camera matrix.
-        - proj_mat: Projection matrix.
-        - z_near: Near plane distance.
+        Args: 
+        - points: 3D points in object space. Nx3
+        - w2c: World-to-camera matrix. 4x4
+        - proj_mat: Projection matrix. 4x4
+        - z_near: Near plane distance. 1
 
         Returns:
         - p_ndc: NDC coordinates.
@@ -137,11 +139,19 @@ class GSRasterizer(object):
         """
         # ========================================================
         # TODO: Implement the projection to NDC space
-        p_ndc = None
-        p_view = None
+        ## 음 어쩄던 가우시안도 지금 world 좌표계에 있으니까, 이걸 NDC로 투영해보라는거같은데? 
+        
+        one = torch.ones(points.shape[0],device=points.device)
+        points = torch.cat([points,one[:,None]],dim=-1) ## 이러면 Nx4
+        
+        p_view = points[:,] @ w2c ## Nx4
+        p_dc = p_view @ proj_mat ## Nx4
+        p_ndc = p_dc/ p_dc[:,3].unsqueeze(-1)
+        ## 이렇게 해야 4번째 |z|로 나눈거같은데?
 
         # TODO: Cull points that are close or behind the camera
-        in_mask = None
+        ## 카메라는 z축이 카메라보다 앞에 있는지, 그리고 -1~1사이에 x,y축이 들어가는지를 판단해야함
+        in_mask = (torch.abs(p_ndc[:,0])<=1)&(torch.abs(p_ndc[:,1])<=1)&(p_view[:,2] >= z_near)
         # ========================================================
 
         return p_ndc, p_view, in_mask
@@ -178,13 +188,23 @@ class GSRasterizer(object):
         # ========================================================
         # TODO: Transform 3D mean coordinates to camera space
         # ========================================================
+        
+        one = torch.ones(mean_3d.shape[0],device=mean_3d.device)
+        mean_3d = torch.cat([mean_3d,one[:,None]],dim=-1)
+        camera_coordinate_mean_3d = mean_3d @ w2c
 
         # Transpose the rigid transformation part of the world-to-camera matrix
-        J = torch.zeros(mean_3d.shape[0], 3, 3).to(mean_3d)
+        J = torch.zeros(mean_3d.shape[0], 3, 3).to(mean_3d) ## N,3,3
         W = w2c[:3, :3].T
         # ========================================================
         # TODO: Compute Jacobian of view transform and projection
         cov_2d = None
+        J[:,0,0] = f_x/camera_coordinate_mean_3d[:,2]
+        J[:,0,-1] = - f_x * camera_coordinate_mean_3d[:,0] / camera_coordinate_mean_3d[:,2]**2
+        J[:,1,1] = f_y/camera_coordinate_mean_3d[:,2]
+        J[:,1,-1] = - f_y * camera_coordinate_mean_3d[:,1] / camera_coordinate_mean_3d[:,2]**2
+        
+        cov_2d = J @ W @ cov_3d @ W.mT @ J.mT ## mT가 배치는 안건드리고 transpose하는거
         # ========================================================
 
         # add low pass filter here according to E.q. 32
@@ -196,7 +216,7 @@ class GSRasterizer(object):
     def render(
         self,
         camera: Camera,
-        mean_2d: Float[torch.Tensor, "N 2"],
+        mean_2d: Float[torch.Tensor, "N 2"], 
         cov_2d: Float[torch.Tensor, "N 2 2"],
         color: Float[torch.Tensor, "N 3"],
         opacities: Float[torch.Tensor, "N 1"],
@@ -205,16 +225,18 @@ class GSRasterizer(object):
         radii = get_radius(cov_2d)
         rect = get_rect(mean_2d, radii, width=camera.image_width, height=camera.image_height)
 
+        ## 이부분이 rasterization 부분임
+        
         pix_coord = torch.stack(
             torch.meshgrid(torch.arange(camera.image_height), torch.arange(camera.image_width), indexing='xy'),
             dim=-1,
-        ).to(mean_2d.device)
+        ).to(mean_2d.device) ## H,W,c(x,y) 즉 H,w는 타일 상의 위치인거고, x,y가 실제 중심 위치
         
         render_color = torch.ones(*pix_coord.shape[:2], 3).to(mean_2d.device)
 
         assert camera.image_height % self.tile_size == 0, "Image height must be divisible by the tile_size."
         assert camera.image_width % self.tile_size == 0, "Image width must be divisible by the tile_size."
-        for h in range(0, camera.image_height, self.tile_size):
+        for h in range(0, camera.image_height, self.tile_size): ## 여기서 각 타일 개수만큼 나눠가지고 iter 돌리기
             for w in range(0, camera.image_width, self.tile_size):
                 # check if the rectangle penetrate the tile
                 over_tl = rect[0][..., 0].clip(min=w), rect[0][..., 1].clip(min=h)
@@ -225,21 +247,39 @@ class GSRasterizer(object):
                 if not in_mask.sum() > 0:
                     continue
 
-                # ========================================================
-                # TODO: Sort the projected Gaussians that lie in the current tile by their depths, in ascending order
-                # ========================================================
+                tile_mean_2d = mean_2d[in_mask]
+                tile_cov_2d = cov_2d[in_mask]
+                tile_color = color[in_mask]
+                tile_opacities = opacities[in_mask]
+                tile_depths = depths[in_mask]
+                sort_idx = torch.argsort(tile_depths)
+                tile_mean_2d = tile_mean_2d[sort_idx]  # M,2
+                tile_cov_2d = tile_cov_2d[sort_idx]
+                tile_color = tile_color[sort_idx]
+                tile_opacities = tile_opacities[sort_idx]
+                tile_depths = tile_depths[sort_idx]
                 
                 # ========================================================
                 # TODO: Compute the displacement vector from the 2D mean coordinates to the pixel coordinates
                 # ========================================================
+        
+                curr_pix = pix_coord[h : h + self.tile_size, w : w + self.tile_size] ## 이러면 현재 타일사이즈 부분 coord 알 수 있음, tile_size x tile_size x 2
+                disp = curr_pix[None,...] - tile_mean_2d[:,None,None,:] ## M,H,W,2
 
                 # ========================================================
                 # TODO: Compute the Gaussian weight for each pixel in the tile
                 # ========================================================
-
+                inv_cov = torch.linalg.inv(tile_cov_2d)
+                mahalanobis = torch.einsum("mhw i, m i j, mhw j -> mhw", disp, inv_cov, disp)
+                weight = torch.exp(-0.5 * mahalanobis)
                 # ========================================================
                 # TODO: Perform alpha blending
-                tile_color = None
+                
+                alpha = tile_opacities[...,None]*weight ## 알파 계산하는 식 다시보기
+                transmittance = torch.cumprod(1.0 - alpha, dim=0)
+                transmittance = torch.cat([torch.ones(1, self.tile_size, self.tile_size, device=alpha.device), transmittance[:-1]], dim=0)   
+                
+                tile_color =  (tile_color[:, None, None, :] * alpha[..., None] * transmittance[..., None]).sum(dim=0)
                 # ========================================================
 
                 render_color[h:h+self.tile_size, w:w+self.tile_size] = tile_color.reshape(self.tile_size, self.tile_size, -1)
