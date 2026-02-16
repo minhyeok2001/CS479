@@ -19,6 +19,21 @@
   <img src="./media/teaser.gif" width="800"/>
 </div>
 
+---
+## Result
+
+<div align="center">
+  <img src="https://github.com/user-attachments/assets/a3a644e3-2955-41fb-b6d4-8d0edb8f8c32" width="60%">
+</div>
+
+<div align="center">
+  <img src="https://github.com/user-attachments/assets/8e0ff7c9-b7d7-4f05-bd60-f79fa1c7647a" width="60%">
+</div>
+
+RTX3090ti , using vast.ai
+
+---
+
 ## Abstract
 
 Following the success of [Neural Radiance Fields (NeRF)](https://arxiv.org/abs/2003.08934) in novel view synthesis using implicit representations, researchers have actively explored adapting similar concepts to other 3D graphics primitives.
